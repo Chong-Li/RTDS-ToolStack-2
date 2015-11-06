@@ -200,16 +200,14 @@
 #define LIBXL_HAVE_DEVICETREE_PASSTHROUGH 1
 
 /*
- * libxl_domain_build_info has the arm.gic_version field.
- */
-#define LIBXL_HAVE_BUILDINFO_ARM_GIC_VERSION 1
+ * libxl_vcpu_sched_params is used to store per-vcpu params
+*/
+#define LIBXL_HAVE_VCPU_SCHED_PARAMS 1
 
 /*
- * LIBXL_HAVE_SOFT_RESET indicates that libxl supports performing
- * 'soft reset' for domains and there is 'soft_reset' shutdown reason
- * in enum libxl_shutdown_reason.
- */
-#define LIBXL_HAVE_SOFT_RESET 1
+ * libxl_sched_params is used to store the array of per-vcpu params
+*/
+#define LIBXL_HAVE_SCHED_PARAMS 1
 
 /*
  * libxl ABI compatibility
@@ -608,14 +606,6 @@ typedef struct libxl__ctx libxl_ctx;
 #define LIBXL_HAVE_SPICE_STREAMINGVIDEO 1
 
 /*
- * LIBXL_HAVE_HVM_HDTYPE
- *
- * If defined, then the u.hvm structure will contain a enum type
- * hdtype.
- */
-#define LIBXL_HAVE_HVM_HDTYPE 1
-
-/*
  * LIBXL_HAVE_DOMAIN_CREATE_RESTORE_PARAMS 1
  *
  * If this is defined, libxl_domain_create_restore()'s API has changed to
@@ -765,12 +755,6 @@ typedef struct libxl__ctx libxl_ctx;
 #define LIBXL_HAVE_BUILDINFO_SERIAL_LIST 1
 
 /*
- * LIBXL_HAVE_ALTP2M
- * If this is defined, then libxl supports alternate p2m functionality.
- */
-#define LIBXL_HAVE_ALTP2M 1
-
-/*
  * LIBXL_HAVE_REMUS
  * If this is defined, then libxl supports remus.
  */
@@ -796,20 +780,6 @@ void libxl_mac_copy(libxl_ctx *ctx, libxl_mac *dst, libxl_mac *src);
  * If this is defined, the Memory Bandwidth Monitoring feature is supported.
  */
 #define LIBXL_HAVE_PSR_MBM 1
-
-/*
- * LIBXL_HAVE_PSR_CAT
- *
- * If this is defined, the Cache Allocation Technology feature is supported.
- */
-#define LIBXL_HAVE_PSR_CAT 1
-
-/*
- * LIBXL_HAVE_PSR_CDP
- *
- * If this is defined, the Code and Data Prioritization feature is supported.
- */
-#define LIBXL_HAVE_PSR_CDP 1
 #endif
 
 /*
@@ -819,39 +789,6 @@ void libxl_mac_copy(libxl_ctx *ctx, libxl_mac *dst, libxl_mac *src);
  * topology is available.
  */
 #define LIBXL_HAVE_PCITOPOLOGY 1
-
-/*
- * LIBXL_HAVE_SOCKET_BITMAP
- *
- * If this is defined, then libxl_socket_bitmap_alloc and
- * libxl_get_online_socketmap exist.
- */
-#define LIBXL_HAVE_SOCKET_BITMAP 1
-
-/*
- * LIBXL_HAVE_SRM_V2
- *
- * If this is defined, then the libxl_domain_create_restore() interface takes
- * a "stream_version" parameter and supports a value of 2.
- *
- * libxl_domain_suspend() will produce a v2 stream.
- */
-#define LIBXL_HAVE_SRM_V2 1
-
-/*
- * LIBXL_HAVE_SRM_V1
- *
- * In the case that LIBXL_HAVE_SRM_V2 is set, LIBXL_HAVE_SRM_V1
- * indicates that libxl_domain_create_restore() can handle a "stream_version"
- * parameter of 1, and convert the stream format automatically.
- */
-#define LIBXL_HAVE_SRM_V1 1
-
-/*
- * libxl_domain_build_info has the u.hvm.gfx_passthru_kind field and
- * the libxl_gfx_passthru_kind enumeration is defined.
-*/
-#define LIBXL_HAVE_GFX_PASSTHRU_KIND
 
 typedef char **libxl_string_list;
 void libxl_string_list_dispose(libxl_string_list *sl);
@@ -935,12 +872,6 @@ const char *libxl_defbool_to_string(libxl_defbool b);
 
 #define LIBXL_TIMER_MODE_DEFAULT -1
 #define LIBXL_MEMKB_DEFAULT ~0ULL
-
-/*
- * We'd like to set a memory boundary to determine if we need to check
- * any overlap with reserved device memory.
- */
-#define LIBXL_RDM_MEM_BOUNDARY_MEMKB_DEFAULT (2048 * 1024)
 
 #define LIBXL_MS_VM_GENID_LEN 16
 typedef struct {
@@ -1152,14 +1083,6 @@ int static inline libxl_domain_create_restore_0x040200(
 #define libxl_domain_create_restore libxl_domain_create_restore_0x040200
 
 #endif
-
-int libxl_domain_soft_reset(libxl_ctx *ctx,
-                            libxl_domain_config *d_config,
-                            uint32_t domid,
-                            const libxl_asyncop_how *ao_how,
-                            const libxl_asyncprogress_how
-                            *aop_console_how)
-                            LIBXL_EXTERNAL_CALLERS_ONLY;
 
   /* A progress report will be made via ao_console_how, of type
    * domain_create_console_available, when the domain's primary
@@ -1641,10 +1564,17 @@ int libxl_sched_credit_params_set(libxl_ctx *ctx, uint32_t poolid,
 #define LIBXL_DOMAIN_SCHED_PARAM_EXTRATIME_DEFAULT -1
 #define LIBXL_DOMAIN_SCHED_PARAM_BUDGET_DEFAULT    -1
 
+/* Per-VCPU parameters*/
+#define LIBXL_SCHED_PARAM_VCPU_INDEX_DEFAULT   -1
+
 int libxl_domain_sched_params_get(libxl_ctx *ctx, uint32_t domid,
                                   libxl_domain_sched_params *params);
 int libxl_domain_sched_params_set(libxl_ctx *ctx, uint32_t domid,
                                   const libxl_domain_sched_params *params);
+int libxl_vcpu_sched_params_get(libxl_ctx *ctx, uint32_t domid,
+                                  libxl_vcpu_sched_params *params);
+int libxl_vcpu_sched_params_set(libxl_ctx *ctx, uint32_t domid,
+                                  const libxl_vcpu_sched_params *params);
 
 int libxl_send_trigger(libxl_ctx *ctx, uint32_t domid,
                        libxl_trigger trigger, uint32_t vcpuid);
@@ -1728,34 +1658,6 @@ int libxl_psr_cmt_get_sample(libxl_ctx *ctx,
                              uint64_t scope,
                              uint64_t *sample_r,
                              uint64_t *tsc_r);
-#endif
-
-#ifdef LIBXL_HAVE_PSR_CAT
-/*
- * Function to set a domain's cbm. It operates on a single or multiple
- * target(s) defined in 'target_map'. The definition of 'target_map' is
- * related to 'type':
- * 'L3_CBM': 'target_map' specifies all the sockets to be operated on.
- */
-int libxl_psr_cat_set_cbm(libxl_ctx *ctx, uint32_t domid,
-                          libxl_psr_cbm_type type, libxl_bitmap *target_map,
-                          uint64_t cbm);
-/*
- * Function to get a domain's cbm. It operates on a single 'target'.
- * The definition of 'target' is related to 'type':
- * 'L3_CBM': 'target' specifies which socket to be operated on.
- */
-int libxl_psr_cat_get_cbm(libxl_ctx *ctx, uint32_t domid,
-                          libxl_psr_cbm_type type, uint32_t target,
-                          uint64_t *cbm_r);
-
-/*
- * On success, the function returns an array of elements in 'info',
- * and the length in 'nr'.
- */
-int libxl_psr_cat_get_l3_info(libxl_ctx *ctx, libxl_psr_cat_info **info,
-                              int *nr);
-void libxl_psr_cat_info_list_free(libxl_psr_cat_info *list, int nr);
 #endif
 
 /* misc */

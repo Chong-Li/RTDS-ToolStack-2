@@ -86,6 +86,18 @@
 #define RTDS_DEFAULT_PERIOD     (MICROSECS(10000))
 #define RTDS_DEFAULT_BUDGET     (MICROSECS(4000))
 
+/*
+ * Max period: max delta of time type
+ * Min period: 100 us, considering the scheduling overhead
+ */
+#define RTDS_MAX_PERIOD     (STIME_DELTA_MAX)
+#define RTDS_MIN_PERIOD     (MICROSECS(10))
+
+/*
+ * Min budget: 100 us
+ */
+#define RTDS_MIN_BUDGET     (MICROSECS(10))
+
 #define UPDATE_LIMIT_SHIFT      10
 #define MAX_SCHEDULE            (MILLISECS(1))
 /*
@@ -256,7 +268,7 @@ rt_dump_vcpu(const struct scheduler *ops, const struct rt_vcpu *svc)
      */
     mask = _cpumask_scratch[svc->vcpu->processor];
 
-    cpupool_mask = cpupool_domain_cpumask(svc->vcpu->domain);
+    cpupool_mask = cpupool_scheduler_cpumask(svc->vcpu->domain->cpupool);
     cpumask_and(mask, cpupool_mask, svc->vcpu->cpu_hard_affinity);
     cpulist_scnprintf(keyhandler_scratch, sizeof(keyhandler_scratch), mask);
     printk("[%5d.%-2u] cpu %u, (%"PRI_stime", %"PRI_stime"),"
@@ -597,7 +609,7 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
     if ( !is_idle_vcpu(vc) )
         svc->budget = RTDS_DEFAULT_BUDGET;
 
-    SCHED_STAT_CRANK(vcpu_alloc);
+    SCHED_STAT_CRANK(vcpu_init);
 
     return svc;
 }
@@ -635,8 +647,6 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
 
     /* add rt_vcpu svc to scheduler-specific vcpu list of the dom */
     list_add_tail(&svc->sdom_elem, &svc->sdom->vcpu);
-
-    SCHED_STAT_CRANK(vcpu_insert);
 }
 
 /*
@@ -650,7 +660,7 @@ rt_vcpu_remove(const struct scheduler *ops, struct vcpu *vc)
     struct rt_dom * const sdom = svc->sdom;
     spinlock_t *lock;
 
-    SCHED_STAT_CRANK(vcpu_remove);
+    SCHED_STAT_CRANK(vcpu_destroy);
 
     BUG_ON( sdom == NULL );
 
@@ -675,7 +685,7 @@ rt_cpu_pick(const struct scheduler *ops, struct vcpu *vc)
     cpumask_t *online;
     int cpu;
 
-    online = cpupool_domain_cpumask(vc->domain);
+    online = cpupool_scheduler_cpumask(vc->domain->cpupool);
     cpumask_and(&cpus, online, vc->cpu_hard_affinity);
 
     cpu = cpumask_test_cpu(vc->processor, &cpus)
@@ -755,7 +765,7 @@ __runq_pick(const struct scheduler *ops, const cpumask_t *mask)
         iter_svc = __q_elem(iter);
 
         /* mask cpu_hard_affinity & cpupool & mask */
-        online = cpupool_domain_cpumask(iter_svc->vcpu->domain);
+        online = cpupool_scheduler_cpumask(iter_svc->vcpu->domain->cpupool);
         cpumask_and(&cpu_common, online, iter_svc->vcpu->cpu_hard_affinity);
         cpumask_and(&cpu_common, mask, &cpu_common);
         if ( cpumask_empty(&cpu_common) )
@@ -931,7 +941,7 @@ rt_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
         cpu_raise_softirq(vc->processor, SCHEDULE_SOFTIRQ);
     else if ( __vcpu_on_q(svc) )
         __q_remove(svc);
-    else if ( svc->flags & RTDS_delayed_runq_add )
+    else if ( test_bit(__RTDS_delayed_runq_add, &svc->flags) )
         clear_bit(__RTDS_delayed_runq_add, &svc->flags);
 }
 
@@ -967,7 +977,7 @@ runq_tickle(const struct scheduler *ops, struct rt_vcpu *new)
     if ( new == NULL || is_idle_vcpu(new->vcpu) )
         return;
 
-    online = cpupool_domain_cpumask(new->vcpu->domain);
+    online = cpupool_scheduler_cpumask(new->vcpu->domain->cpupool);
     cpumask_and(&not_tickled, online, new->vcpu->cpu_hard_affinity);
     cpumask_andnot(&not_tickled, &not_tickled, &prv->tickled);
 
@@ -1064,7 +1074,7 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
      * the Runqueue/DepletedQ. Instead, we set a flag so that it will be
      * put on the Runqueue/DepletedQ after the context has been saved.
      */
-    if ( unlikely(svc->flags & RTDS_scheduled) )
+    if ( unlikely(test_bit(__RTDS_scheduled, &svc->flags)) )
     {
         set_bit(__RTDS_delayed_runq_add, &svc->flags);
         return;
@@ -1080,7 +1090,7 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
 
     ASSERT(!list_empty(&prv->sdom));
     sdom = list_entry(prv->sdom.next, struct rt_dom, sdom_elem);
-    online = cpupool_domain_cpumask(sdom->dom);
+    online = cpupool_scheduler_cpumask(sdom->dom->cpupool);
     snext = __runq_pick(ops, online); /* pick snext from ALL valid cpus */
 
     runq_tickle(ops, snext);
@@ -1115,7 +1125,7 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
 
         ASSERT(!list_empty(&prv->sdom));
         sdom = list_entry(prv->sdom.next, struct rt_dom, sdom_elem);
-        online = cpupool_domain_cpumask(sdom->dom);
+        online = cpupool_scheduler_cpumask(sdom->dom->cpupool);
         snext = __runq_pick(ops, online); /* pick snext from ALL cpus */
 
         runq_tickle(ops, snext);
@@ -1134,22 +1144,25 @@ rt_dom_cntl(
     struct xen_domctl_scheduler_op *op)
 {
     struct rt_private *prv = rt_priv(ops);
+    //printk("warning0\n");
     struct rt_dom * const sdom = rt_dom(d);
     struct rt_vcpu *svc;
     struct list_head *iter;
     unsigned long flags;
     int rc = 0;
-
+    int warn = 0;
+    xen_domctl_schedparam_vcpu_t local_sched;
+    s_time_t period, budget;
+    uint32_t index;
     switch ( op->cmd )
     {
-    case XEN_DOMCTL_SCHEDOP_getinfo:
+    case XEN_DOMCTL_SCHEDOP_getinfo: /* return the default parameters */
         spin_lock_irqsave(&prv->lock, flags);
-        svc = list_entry(sdom->vcpu.next, struct rt_vcpu, sdom_elem);
-        op->u.rtds.period = svc->period / MICROSECS(1); /* transfer to us */
-        op->u.rtds.budget = svc->budget / MICROSECS(1);
+        op->u.rtds.period = RTDS_DEFAULT_PERIOD / MICROSECS(1); /* transfer to us */
+        op->u.rtds.budget = RTDS_DEFAULT_BUDGET / MICROSECS(1);
         spin_unlock_irqrestore(&prv->lock, flags);
         break;
-    case XEN_DOMCTL_SCHEDOP_putinfo:
+    case XEN_DOMCTL_SCHEDOP_putinfo: /* set parameters for all vcpus */
         if ( op->u.rtds.period == 0 || op->u.rtds.budget == 0 )
         {
             rc = -EINVAL;
@@ -1158,14 +1171,99 @@ rt_dom_cntl(
         spin_lock_irqsave(&prv->lock, flags);
         list_for_each( iter, &sdom->vcpu )
         {
-            svc = list_entry(iter, struct rt_vcpu, sdom_elem);
+            struct rt_vcpu * svc = list_entry(iter, struct rt_vcpu, sdom_elem);
             svc->period = MICROSECS(op->u.rtds.period); /* transfer to nanosec */
             svc->budget = MICROSECS(op->u.rtds.budget);
         }
         spin_unlock_irqrestore(&prv->lock, flags);
         break;
-    }
+    case XEN_DOMCTL_SCHEDOP_getvcpuinfo:
+        spin_lock_irqsave(&prv->lock, flags);
+        for ( index = 0; index < op->u.v.nr_vcpus; index++ )
+        {
+            if ( copy_from_guest_offset(&local_sched,
+                          op->u.v.vcpus, index, 1) )
+            {
+                rc = -EFAULT;
+                break;
+            }
+            if ( local_sched.vcpuid >= d->max_vcpus ||
+                          d->vcpu[local_sched.vcpuid] == NULL )
+            {
+                rc = -EINVAL;
+                break;
+            }
+            svc = rt_vcpu(d->vcpu[local_sched.vcpuid]);
 
+            local_sched.s.rtds.budget = svc->budget / MICROSECS(1);
+            local_sched.s.rtds.period = svc->period / MICROSECS(1);
+
+            if ( __copy_to_guest_offset(op->u.v.vcpus, index,
+                    &local_sched, 1) )
+            {
+                rc = -EFAULT;
+                break;
+            }
+            if( hypercall_preempt_check() )
+            {
+                rc = -ERESTART;
+                break;
+            }
+        }
+        spin_unlock_irqrestore(&prv->lock, flags);
+        break;
+    case XEN_DOMCTL_SCHEDOP_putvcpuinfo:
+        //printk("warning111:\n");
+        spin_lock_irqsave(&prv->lock, flags);
+        for( index = 0; index < op->u.v.nr_vcpus; index++ )
+        {
+            if ( copy_from_guest_offset(&local_sched,
+                          op->u.v.vcpus, index, 1) )
+            {
+                rc = -EFAULT;
+                break;
+            }
+	    //printk("warning222:\n");
+            if ( local_sched.vcpuid >= d->max_vcpus ||
+                          d->vcpu[local_sched.vcpuid] == NULL )
+            {
+                rc = -EINVAL;
+                break;
+            }
+            svc = rt_vcpu(d->vcpu[local_sched.vcpuid]);
+            period = MICROSECS(local_sched.s.rtds.period);
+            budget = MICROSECS(local_sched.s.rtds.budget);
+            if ( period > RTDS_MAX_PERIOD || budget < RTDS_MIN_BUDGET ||
+                          budget > period )
+            {
+                rc = -EINVAL;
+                break;
+            }
+
+            /* 
+             * We accept period/budget less than 100 us, but will warn users about
+             * the large scheduling overhead due to it
+             */
+            //printk("warning333\n");
+            if ( period < MICROSECS(100) || budget < MICROSECS(100) )
+            {
+                //warn = 1;
+                printk("warning:\n");
+            }
+
+            svc->period = period;
+            svc->budget = budget;
+            if( hypercall_preempt_check() )
+            {
+                rc = -ERESTART;
+                break;
+            }
+        }
+        spin_unlock_irqrestore(&prv->lock, flags);
+        break;
+    }
+    if ( rc == 0 && warn == 1 ) /* print warning in libxl */
+        rc = 1;
     return rc;
 }
 

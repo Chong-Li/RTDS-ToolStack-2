@@ -19,7 +19,8 @@
  * Lesser General Public License for more details.
  *
  * You should have received a copy of the GNU Lesser General Public
- * License along with this library; If not, see <http://www.gnu.org/licenses/>.
+ * License along with this library; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
  */
 
 #include "xc_private.h"
@@ -59,6 +60,60 @@ int xc_sched_rtds_domain_get(xc_interface *xch,
 
     if ( rc == 0 )
         *sdom = domctl.u.scheduler_op.u.rtds;
+
+    return rc;
+}
+
+int xc_sched_rtds_vcpu_set(xc_interface *xch,
+                           uint32_t domid,
+                           xen_domctl_schedparam_vcpu_t *vcpus,
+                           uint32_t num_vcpus)
+{
+    int rc;
+    DECLARE_DOMCTL;
+    DECLARE_HYPERCALL_BOUNCE(vcpus, sizeof(*vcpus) * num_vcpus,
+            XC_HYPERCALL_BUFFER_BOUNCE_IN);
+
+    if ( xc_hypercall_bounce_pre(xch, vcpus) )
+        return -1;
+
+    domctl.cmd = XEN_DOMCTL_scheduler_op;
+    domctl.domain = (domid_t) domid;
+    domctl.u.scheduler_op.sched_id = XEN_SCHEDULER_RTDS;
+    domctl.u.scheduler_op.cmd = XEN_DOMCTL_SCHEDOP_putvcpuinfo;
+    domctl.u.scheduler_op.u.v.nr_vcpus = num_vcpus;
+    set_xen_guest_handle(domctl.u.scheduler_op.u.v.vcpus, vcpus);
+
+    rc = do_domctl(xch, &domctl);
+
+    xc_hypercall_bounce_post(xch, vcpus);
+
+    return rc;
+}
+
+int xc_sched_rtds_vcpu_get(xc_interface *xch,
+                           uint32_t domid,
+                           xen_domctl_schedparam_vcpu_t *vcpus,
+                           uint32_t num_vcpus)
+{
+    int rc;
+    DECLARE_DOMCTL;
+    DECLARE_HYPERCALL_BOUNCE(vcpus, sizeof(*vcpus) * num_vcpus,
+            XC_HYPERCALL_BUFFER_BOUNCE_BOTH);
+
+    if ( xc_hypercall_bounce_pre(xch, vcpus) )
+        return -1;
+
+    domctl.cmd = XEN_DOMCTL_scheduler_op;
+    domctl.domain = (domid_t) domid;
+    domctl.u.scheduler_op.sched_id = XEN_SCHEDULER_RTDS;
+    domctl.u.scheduler_op.cmd = XEN_DOMCTL_SCHEDOP_getvcpuinfo;
+    domctl.u.scheduler_op.u.v.nr_vcpus = num_vcpus;
+    set_xen_guest_handle(domctl.u.scheduler_op.u.v.vcpus, vcpus);
+
+    rc = do_domctl(xch, &domctl);
+
+    xc_hypercall_bounce_post(xch, vcpus);
 
     return rc;
 }

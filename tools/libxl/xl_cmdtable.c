@@ -265,13 +265,31 @@ struct cmd_spec cmd_table[] = {
       "-w WEIGHT, --weight=WEIGHT     Weight (int)\n"
       "-p CPUPOOL, --cpupool=CPUPOOL  Restrict output to CPUPOOL"
     },
+    { "sched-sedf",
+      &main_sched_sedf, 0, 1,
+      "Get/set sedf scheduler parameters",
+      "[options]",
+      "-d DOMAIN, --domain=DOMAIN     Domain to modify\n"
+      "-p MS, --period=MS             Relative deadline(ms)\n"
+      "-s MS, --slice=MS              Worst-case execution time(ms).\n"
+      "                               (slice < period)\n"
+      "-l MS, --latency=MS            Scaled period (ms) when domain\n"
+      "                               performs heavy I/O\n"
+      "-e FLAG, --extra=FLAG          Flag (0 or 1) controls if domain\n"
+      "                               can run in extra time\n"
+      "-w FLOAT, --weight=FLOAT       CPU Period/slice (do not set with\n"
+      "                               --period/--slice)\n"
+      "-c CPUPOOL, --cpupool=CPUPOOL  Restrict output to CPUPOOL"
+    },
     { "sched-rtds",
       &main_sched_rtds, 0, 1,
       "Get/set rtds scheduler parameters",
-      "[-d <Domain> [-p[=PERIOD]] [-b[=BUDGET]]]",
-      "-d DOMAIN, --domain=DOMAIN     Domain to modify\n"
-      "-p PERIOD, --period=PERIOD     Period (us)\n"
-      "-b BUDGET, --budget=BUDGET     Budget (us)\n"
+      "[-d <Domain> [-v[=VCPUID]] [-p[=PERIOD]] [-b[=BUDGET]]]",
+      "-d DOMAIN, --domain=DOMAIN 	Domain to modify\n"
+      "-v VCPUID/all, --vcpuid=VCPUID/all    VCPU to modify or output;\n"
+      "                               Using '-v all' to modify/output all vcpus\n"
+      "-p PERIOD, --period=PERIOD 	Period (us)\n"
+      "-b BUDGET, --budget=BUDGET 	Budget (us)\n"
     },
     { "domid",
       &main_domid, 0, 0,
@@ -506,17 +524,9 @@ struct cmd_spec cmd_table[] = {
       &main_devd, 0, 1,
       "Daemon that listens for devices and launches backends",
       "[options]",
-      "-F                      Run in the foreground.\n"
-      "-p, --pidfile [FILE]    Write PID to pidfile when daemonizing.",
+      "-F                      Run in the foreground",
     },
 #ifdef LIBXL_HAVE_PSR_CMT
-    { "psr-hwinfo",
-      &main_psr_hwinfo, 0, 1,
-      "Show hardware information for Platform Shared Resource",
-      "[options]",
-      "-m, --cmt       Show Cache Monitoring Technology (CMT) hardware info\n"
-      "-a, --cat       Show Cache Allocation Technology (CAT) hardware info\n"
-    },
     { "psr-cmt-attach",
       &main_psr_cmt_attach, 0, 1,
       "Attach Cache Monitoring Technology service to a domain",
@@ -532,26 +542,10 @@ struct cmd_spec cmd_table[] = {
       "Show Cache Monitoring Technology information",
       "<PSR-CMT-Type> <Domain>",
       "Available monitor types:\n"
-      "\"cache-occupancy\":         Show L3 cache occupancy(KB)\n"
-      "\"total-mem-bandwidth\":     Show total memory bandwidth(KB/s)\n"
-      "\"local-mem-bandwidth\":     Show local memory bandwidth(KB/s)\n",
+      "\"cache_occupancy\":         Show L3 cache occupancy(KB)\n"
+      "\"total_mem_bandwidth\":     Show total memory bandwidth(KB/s)\n"
+      "\"local_mem_bandwidth\":     Show local memory bandwidth(KB/s)\n",
     },
-#endif
-#ifdef LIBXL_HAVE_PSR_CAT
-    { "psr-cat-cbm-set",
-      &main_psr_cat_cbm_set, 0, 1,
-      "Set cache capacity bitmasks(CBM) for a domain",
-      "[options] <Domain> <CBM>",
-      "-s <socket>       Specify the socket to process, otherwise all sockets are processed\n"
-      "-c                Set code CBM if CDP is supported\n"
-      "-d                Set data CBM if CDP is supported\n"
-    },
-    { "psr-cat-show",
-      &main_psr_cat_show, 0, 1,
-      "Show Cache Allocation Technology information",
-      "<Domain>",
-    },
-
 #endif
 };
 
